@@ -485,7 +485,7 @@ def normalize_races(string):
 
     """
 
-    general_filter_regex = re.compile(r'(countywide|initiative|county of|city of|port|director|council|school|mayor)', re.IGNORECASE)
+    general_filter_regex = re.compile(r'(countywide|initiative|county of|city of|port|director|council|school|mayor|engrossed|advisory)', re.IGNORECASE)
     presidential_regex = re.compile('president', re.IGNORECASE)
     senate_regex = re.compile(r'(senate|senator)', re.IGNORECASE)
     house_regex = re.compile(r'(house|representative)', re.IGNORECASE)
@@ -569,7 +569,7 @@ def normalize_races(string):
         return 'President'
     else:
         return 'N/A'
-
+       
 
 class SkipLoader(WABaseLoader):
 
@@ -660,8 +660,9 @@ class WALoaderPrecincts(OCDMixin, WABaseLoader):
                     except (IndexError, KeyError):
                         party_flag = 1
                     try:
-                        rr_kwargs.update(
-                            {'district': normalize_district(self.header, row[self.contest_index], row)})
+                        rr_kwargs.update({
+                            'district': normalize_district(self.header, row[self.contest_index], row)
+                        })
                     except KeyError:
                         district_flag = 1
                     results.append(RawResult(**rr_kwargs))
@@ -750,10 +751,12 @@ class WALoaderPre2007(OCDMixin, WABaseLoader):
         Builds kwargs for specific contest
 
         """
-
+        if row['officeposition'] == 'NA':
+            office_pos = ''
+        else:
+            office_pos = row['officeposition']
         kwargs = {
-            'office': row['officename'],
-            'primary_party': row['partycode'].strip()
+            'office': "{} {}".format(row['officename'], office_pos).strip(),
         }
         return kwargs
 
@@ -838,7 +841,6 @@ class WALoaderPost2007(OCDMixin, WABaseLoader):
                     continue
                 else:
                     rr_kwargs = self._common_kwargs.copy()
-                    rr_kwargs['primary_party'] = row['Party'].strip()
                     rr_kwargs.update(self._build_contest_kwargs(row))
                     rr_kwargs.update(self._build_candidate_kwargs(row))
                     rr_kwargs.update({
@@ -847,8 +849,9 @@ class WALoaderPost2007(OCDMixin, WABaseLoader):
                         'ocd_id': "{}".format(self._get_ocd_id(rr_kwargs['jurisdiction'])),
                     })
                     try:
-                        rr_kwargs.update(
-                            {'district': normalize_district(self.header, row[self.contest_index], row)})
+                        rr_kwargs.update({
+                            'district': normalize_district(self.header, row[self.contest_index], row)
+                        })
                     except KeyError:
                         district_flag = 1
                     results.append(RawResult(**rr_kwargs))

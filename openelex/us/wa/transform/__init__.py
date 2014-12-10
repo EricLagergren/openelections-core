@@ -20,8 +20,9 @@ contest_fields = meta_fields + ['start_date',
                                 'end_date',
                                 'election_type',
                                 'primary_type',
-                                'result_type',
                                 'special',
+                                'result_type',
+                                'party',
                                 ]
 candidate_fields = meta_fields + ['full_name', 'given_name',
                                   'family_name', 'additional_name']
@@ -136,7 +137,8 @@ class BaseTransform(Transform):
         'U.S. Senate',
         'U.S. House of Representatives',
         'State Senate',
-        'State House of Representatives',
+        'State House of Representatives 1',
+        'State House of Representatives 2',
     ])
 
     def __init__(self):
@@ -150,12 +152,10 @@ class BaseTransform(Transform):
 
     def get_contest_fields(self, raw_result):
         fields = self._get_fields(raw_result, contest_fields)
-        #if not fields['primary_type']:
-        #    del fields['primary_type']
         fields['office'] = self._get_office(raw_result)
-        #quit()
-        #fields['primary_party'] = self.get_party(raw_result, 'primary')
-
+        if fields['primary_type'] not in (''):
+            print "{} {}".format(fields['end_date'], fields['primary_type'])
+            #quit(fields)
         return fields
 
     def _get_fields(self, raw_result, field_names):
@@ -172,8 +172,7 @@ class BaseTransform(Transform):
             office_query['state'] = 'US'
 
         if office_query['name'] in self.district_offices:
-            #if raw_result.district:
-                office_query['district'] = raw_result.district or ''
+            office_query['district'] = raw_result.district or ''
 
         key = Office.make_key(**office_query)
 
@@ -187,6 +186,7 @@ class BaseTransform(Transform):
                 return office
             except Office.DoesNotExist:
                 logger.error("\tNo office matching query {}".format(office_query))
+                print office_query
                 raise
 
 
@@ -203,6 +203,8 @@ class BaseTransform(Transform):
             return self._party_cache[clean_abbrev]
         except KeyError:
             try:
+                for p in Party.objects:
+                    print p
                 party = Party.objects.get(abbrev=clean_abbrev)
                 self._party_cache[clean_abbrev] = party
                 return party
@@ -216,15 +218,22 @@ class BaseTransform(Transform):
         except KeyError:
             return None
 
+    def _extract_int(self, regex_tuple):
+        for g in regex_tuple:
+            try:
+                return int(g)
+            except (ValueError, TypeError):
+                pass
+
     def _clean_office(self, office):
         """
-        See: https://github.com/openelections/core/blob/dev/openelex/us/wa/load.py#L370
+        See: https://github.com/openelections/core/blob/dev/openelex/us/wa/load.py
 
         """
 
         presidential_regex = re.compile('president', re.IGNORECASE)
-        senate_regex = re.compile('(senate|senator)', re.IGNORECASE)
-        house_regex = re.compile('(house|representative)', re.IGNORECASE)
+        senate_regex = re.compile(r'(senate|senator)', re.IGNORECASE)
+        house_regex = re.compile(r'(house|representative)', re.IGNORECASE)
         governor_regex = re.compile('governor', re.IGNORECASE)
         treasurer_regex = re.compile('treasurer', re.IGNORECASE)
         auditor_regex = re.compile('auditor', re.IGNORECASE)
@@ -242,12 +251,23 @@ class BaseTransform(Transform):
         national_regex = re.compile(
             r'(U\.S\.|\bUS\b|Congressional|National|United\s+States|U\.\s+S\.\s+)',
             re.IGNORECASE)
+        position_regex = re.compile(r'pos(ition|)(|\s|\.|_|-)(\s|)(no\.|no|)(\s|)(#|)(\d)', re.IGNORECASE)
 
         if re.search(house_regex, office):
             if re.search(national_regex, office):
                 return 'U.S. House of Representatives'
             elif re.search(local_regex, office):
-                return 'State House of Representatives'
+                tmp_pos = self._extract_int(re.search(position_regex, office).groups())
+                if tmp_pos == 2:
+                    return 'State House of Representatives 2'
+                elif tmp_pos == 1:
+                    return 'State House of Representatives 1'
+                # Sanity check regex in case it catches an incorrect
+                # number
+                elif tmp_pos > 2 or tmp_pos is not None and tmp_pos < 1:
+                    raise RuntimeError('{} is not a valid positional number (i.e. 1 or 2'.format(tmp_pos))
+                else:
+                    return 'State House of Representatives'
             else:
                 return None
         elif re.search(governor_regex, office):
@@ -310,25 +330,16 @@ class BaseTransform(Transform):
         key = "%s-%s" % (raw_result.election_id, raw_result.contest_slug)
 
         try:
-            #print self._contest_cache[key]
             return self._contest_cache[key]
         except KeyError:
-            #raise
             fields = self.get_contest_fields(raw_result)
-            #print fields
-            #quit(fields['source'])
             fields.pop('source')
             try:
-                #contest = Contest.objects.get(**fields)
-                try:
-                    contest = Contest.objects.filter(**fields)[0]
-                except IndexError:
-                    contest = Contest.objects.get(**fields)
-                #print contest
-                #quit("uuuuuuuuuuuu")
+                contest = Contest.objects.get(**fields)
             except Exception:
+                for c in Contest.objects.filter(**fields):
+                    print c
                 print fields
-                print "\n"
                 raise
             self._contest_cache[key] = contest
             return contest
@@ -349,7 +360,6 @@ class CreateContestsTransform(BaseTransform):
                 contests.append(contest)
                 seen.add(key)
 
-        print seen
         Contest.objects.insert(contests, load_bulk=False)
         logger.info("Created {} contests.".format(len(contests)))
 
@@ -380,7 +390,6 @@ class CreateCandidatesTransform(BaseTransform):
                 if not fields['full_name']:
                     quit(fields)
                 fields['contest'] = self.get_contest(rr)
-                #print fields
                 candidate = Candidate(**fields)
                 candidates.append(candidate)
                 seen.add(key)
